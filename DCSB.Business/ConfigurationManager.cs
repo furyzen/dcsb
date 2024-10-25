@@ -13,66 +13,72 @@ namespace DCSB.Business
     {
         private const string DirectoryName = "DCSB";
         private const string FileName = "config.xml";
-        private const string TempFileName = "config_tmp.xml";
         private const string BackupFileName = "config_backup.xml";
         private readonly string ConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), DirectoryName, FileName);
-        private readonly string TempConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), DirectoryName, TempFileName);
         private readonly string BackupConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), DirectoryName, BackupFileName);
 
         private Timer _timer;
         private ConfigurationModel _model;
 
+        private readonly object _fileAccess = new object();
+
         private void SaveCallback(object state)
         {
-            XmlSerializer serializer = new XmlSerializer(typeof(ConfigurationModel));
+            lock (_fileAccess)
+            {
+                XmlSerializer serializer = new XmlSerializer(typeof(ConfigurationModel));
 
-            if (!File.Exists(TempConfigPath))
-            {
-                CreateFile(TempConfigPath);
-            }
-            using (FileStream stream = File.Open(TempConfigPath, FileMode.Truncate))
-            {
-                serializer.Serialize(stream, _model);
-            }
+                if (!File.Exists(ConfigPath))
+                {
+                    CreateFile(ConfigPath);
+                }
+                using (FileStream stream = File.Open(ConfigPath, FileMode.Truncate))
+                {
+                    serializer.Serialize(stream, _model);
+                }
 
-            if (File.Exists(ConfigPath))
-            {
-                File.Replace(TempConfigPath, ConfigPath, BackupConfigPath, true);
-            }
-            else
-            {
-                File.Move(TempConfigPath, ConfigPath);
-            }
+                if (File.Exists(BackupConfigPath))
+                {
+                    File.Replace(BackupConfigPath, ConfigPath, null);
+                }
+                else
+                {
+                    File.Copy(ConfigPath, BackupConfigPath);
+                }
 
-            Debug.WriteLine("Saved configuration");
-            _timer.Dispose();
-            _timer = null;
+                Debug.WriteLine("Saved configuration");
+                _timer.Dispose();
+                _timer = null;
+            }
         }
 
         public ConfigurationModel Load()
         {
-            if (!File.Exists(ConfigPath))
+            lock (_fileAccess)
             {
-                return new ConfigurationModel();
-            }
-
-            XmlSerializer serializer = new XmlSerializer(typeof(ConfigurationModel));
-            ConfigurationModel result;
-
-            using (FileStream stream = File.Open(ConfigPath, FileMode.Open))
-            {
-                try
+                if (!File.Exists(ConfigPath))
                 {
-                    result = (ConfigurationModel)serializer.Deserialize(stream);
-                    return result;
+                    return new ConfigurationModel();
                 }
-                catch (Exception e)
-                {
-                    Debug.WriteLine(e);
-                }
-            }
 
-            MoveCorruptedConfig(ConfigPath);
+                XmlSerializer serializer = new XmlSerializer(typeof(ConfigurationModel));
+                ConfigurationModel result;
+
+                using (FileStream stream = File.Open(ConfigPath, FileMode.Open))
+                {
+                    try
+                    {
+                        result = (ConfigurationModel)serializer.Deserialize(stream);
+                        return result;
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.WriteLine(e);
+                    }
+                }
+
+                MoveCorruptedConfig(ConfigPath);
+            }
             return new ConfigurationModel();
         }
 
